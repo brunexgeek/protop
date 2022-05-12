@@ -41,8 +41,9 @@ add_library(libprotop STATIC
     "source/parser.cc"
     "source/exception.cc")
 target_include_directories(libprotop PUBLIC "include")
+set_target_properties(libprotop PROPERTIES PUBLIC_HEADER "include/protop/protop.hh")
 set_target_properties(libprotop PROPERTIES
-    OUTPUT_NAME "libprotop"
+    OUTPUT_NAME "protop"
     VERSION "${PROTOP_MAJOR_VERSION}.${PROTOP_MINOR_VERSION}.${PROTOP_PATCH_VERSION}"
     SOVERSION "${PROTOP_MAJOR_VERSION}.${PROTOP_MINOR_VERSION}.${PROTOP_PATCH_VERSION}"
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
@@ -51,3 +52,8 @@ set_target_properties(libprotop PROPERTIES
 add_executable(example_format
     "example/format/main.cc")
 target_link_libraries(example_format libprotop)
+
+INSTALL(TARGETS libprotop
+    PUBLIC_HEADER DESTINATION include/protop
+    LIBRARY DESTINATION lib
+)
