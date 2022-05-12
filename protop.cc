@@ -47,13 +47,13 @@
 #define TOKEN_T_BOOL           18
 #define TOKEN_T_STRING         19
 #define TOKEN_T_BYTES          20
-#define TOKEN_T_MESSAGE        21
-#define TOKEN_SYNTAX           22
+#define TOKEN_T_COMPLEX        21
+#define TOKEN_ENUM             22
+#define TOKEN_SYNTAX           27
 #define TOKEN_QNAME            23
 #define TOKEN_STRING           24
 #define TOKEN_INTEGER          25
 #define TOKEN_COMMENT          26
-#define TOKEN_ENUM             27
 #define TOKEN_SCOLON           28
 #define TOKEN_PACKAGE          29
 #define TOKEN_LT               30
@@ -67,6 +67,11 @@
 #define TOKEN_FALSE            38
 #define TOKEN_LBRACKET         39
 #define TOKEN_RBRACKET         40
+#define TOKEN_RPC              41
+#define TOKEN_SERVICE          42
+#define TOKEN_RETURNS          43
+#define TOKEN_LPAREN           44
+#define TOKEN_RPAREN           45
 
 
 #ifdef BUILD_DEBUG
@@ -113,7 +118,14 @@ static const char *TOKENS[] =
     "TOKEN_FALSE",
     "TOKEN_LBRACKET",
     "TOKEN_RBRACKET",
+    "RPC",
+    "SERVICE",
+    "RETURNS",
+    "TOKEN_LPAREN",
+    "TOKEN_RPAREN",
 };
+
+#endif
 
 static const char *TYPES[] =
 {
@@ -134,8 +146,6 @@ static const char *TYPES[] =
     "bytes",
     nullptr,
 };
-
-#endif
 
 static const struct
 {
@@ -167,6 +177,9 @@ static const struct
     { TOKEN_OPTION      , "option" },
     { TOKEN_TRUE        , "true" },
     { TOKEN_FALSE       , "false" },
+    { TOKEN_RPC         , "rpc" },
+    { TOKEN_SERVICE     , "service" },
+    { TOKEN_RETURNS     , "returns" },
     { 0, nullptr },
 };
 
@@ -314,6 +327,8 @@ template <typename I> class Tokenizer
             ungot = true;
         }
 
+        // TODO: create function to consume token and throw error is not from indicated type
+
         Token next()
         {
             int line = 1;
@@ -363,6 +378,12 @@ template <typename I> class Tokenizer
                 else
                 if (cur == '}')
                     current = Token(TOKEN_END, "", line, column);
+                else
+                if (cur == '(')
+                    current = Token(TOKEN_LPAREN, "", line, column);
+                else
+                if (cur == ')')
+                    current = Token(TOKEN_RPAREN, "", line, column);
                 else
                 if (cur == ';')
                     current = Token(TOKEN_SCOLON, "", line, column);
@@ -530,23 +551,15 @@ std::ostream &operator<<( std::ostream &out, protogen::Proto3 &proto );
 
 namespace protogen {
 
-
-TypeInfo::TypeInfo() : id(TYPE_DOUBLE), ref(nullptr), repeated(false)
+static std::string qualifiedName( ProtoContext &ctx, const std::string &name )
 {
+    if (ctx.package.empty()) return name;
+    return ctx.package + '.' + name;
 }
-
 
 Field::Field() : index(0)
 {
 }
-
-
-std::string Message::qualifiedName() const
-{
-    if (package.empty()) return name;
-    return package + '.' + name;
-}
-
 
 static OptionEntry parseOption( ProtoContext &ctx )
 {
@@ -613,11 +626,17 @@ static void parseStandardOption( ProtoContext &ctx, OptionMap &entries )
     entries[option.name] = option;
 }
 
+static Enum *findEnum( ProtoContext &ctx, const std::string &name )
+{
+    for (auto it = ctx.tree.enums.begin(); it != ctx.tree.enums.end(); ++it)
+        if ((*it)->qname == name) return *it;
+    return nullptr;
+}
 
 static Message *findMessage( ProtoContext &ctx, const std::string &name )
 {
     for (auto it = ctx.tree.messages.begin(); it != ctx.tree.messages.end(); ++it)
-        if ((*it)->qualifiedName() == name) return *it;
+        if ((*it)->qname == name) return *it;
     return nullptr;
 }
 
@@ -636,32 +655,25 @@ static std::string parseFieldName( ProtoContext &ctx )
     return ctx.tokens.current.value;
 }
 
-static void parseField( ProtoContext &ctx, Message &message )
+static void parseTypeInfo( ProtoContext &ctx, TypeInfo &type )
 {
-    Field field;
-
-    if (ctx.tokens.current.code == TOKEN_REPEATED)
-    {
-        field.type.repeated = true;
-        ctx.tokens.next();
-    }
-    else
-        field.type.repeated = false;
-
-    // type
     if (ctx.tokens.current.code >= TOKEN_T_DOUBLE && ctx.tokens.current.code <= TOKEN_T_BYTES)
-        field.type.id = (FieldType) ctx.tokens.current.code;
+        type.id = (FieldType) ctx.tokens.current.code;
     else
     if (ctx.tokens.current.code == TOKEN_NAME || ctx.tokens.current.code == TOKEN_QNAME)
     {
-        field.type.id = (FieldType) TOKEN_T_MESSAGE;
-        if (!message.package.empty())
+        type.id = TYPE_COMPLEX;
+        if (!ctx.package.empty())
         {
-            field.type.qname += message.package;
-            field.type.qname += '.';
+            type.qname += ctx.package;
+            type.qname += '.';
         }
-        field.type.qname += ctx.tokens.current.value;
-        field.type.ref = findMessage(ctx, field.type.qname);
+        type.qname += ctx.tokens.current.value;
+        type.mref = nullptr;
+        type.eref = nullptr;
+        /*type.mref = findMessage(ctx, type.qname);
+        if (type.mref == nullptr)
+            type.eref = findEnum(ctx, type.qname);*/
     }
 # if 0
     else
@@ -682,7 +694,23 @@ static void parseField( ProtoContext &ctx, Message &message )
     }
 #endif
     else
-        throw exception("Missing field type", TOKEN_POSITION(ctx.tokens.current));
+        throw exception("Missing type", TOKEN_POSITION(ctx.tokens.current));
+}
+
+static void parseField( ProtoContext &ctx, Message &message )
+{
+    Field field;
+
+    if (ctx.tokens.current.code == TOKEN_REPEATED)
+    {
+        field.type.repeated = true;
+        ctx.tokens.next();
+    }
+    else
+        field.type.repeated = false;
+
+    // type
+    parseTypeInfo(ctx, field.type);
 
     // name
     //if (ctx.tokens.next().code != TOKEN_NAME) throw exception("Missing field name", TOKEN_POSITION(ctx.tokens.current));
@@ -717,7 +745,7 @@ static void parseField( ProtoContext &ctx, Message &message )
     message.fields.push_back(field);
 }
 
-
+/*
 void Message::splitPackage(
     std::vector<std::string> &out )
 {
@@ -740,7 +768,7 @@ void Message::splitPackage(
         ++ptr;
     }
 }
-
+*/
 static void parseContant( ProtoContext &ctx, Enum &entity )
 {
     Constant *value = new(std::nothrow) Constant();
@@ -754,9 +782,12 @@ static void parseContant( ProtoContext &ctx, Enum &entity )
     // value
     if (ctx.tokens.next().code != TOKEN_INTEGER)
         throw exception("Missing constant value", CURRENT_TOKEN_POSITION);
+    value->value = (int) strtol(ctx.tokens.current.value.c_str(), nullptr, 10);
     // semicolon
     if (ctx.tokens.next().code != TOKEN_SCOLON)
         throw exception("Missing semicolon", CURRENT_TOKEN_POSITION);
+
+    entity.constants.push_back(value);
 }
 
 static void parseEnum( ProtoContext &ctx )
@@ -768,6 +799,8 @@ static void parseEnum( ProtoContext &ctx )
             throw exception("Out of memory");
         //splitPackage(message.package, ctx.package);
         entity->name = ctx.tokens.current.value;
+        entity->qname = qualifiedName(ctx, entity->name);
+        std::cerr << "Found " << entity->qname << '\n';
         if (ctx.tokens.next().code != TOKEN_BEGIN)
             throw exception("Missing enum body", CURRENT_TOKEN_POSITION);
 
@@ -792,8 +825,10 @@ static void parseMessage( ProtoContext &ctx )
         if (message == nullptr)
             throw exception("Out of memory");
         //splitPackage(message.package, ctx.package);
-        message->package = ctx.package;
+        //message->package = ctx.package;
         message->name = ctx.tokens.current.value;
+        message->qname = qualifiedName(ctx, message->name);
+        std::cerr << "Found " << message->qname << '\n';
         if (ctx.tokens.next().code != TOKEN_BEGIN)
             throw exception("Missing message body", CURRENT_TOKEN_POSITION);
 
@@ -838,6 +873,59 @@ static void parseSyntax( ProtoContext &ctx )
         throw exception("Invalid syntax", CURRENT_TOKEN_POSITION);
 }
 
+static void parseProcedure( ProtoContext &ctx, Service *service )
+{
+    auto proc = new(std::nothrow) Procedure();
+
+    // name
+    ctx.tokens.next();
+    proc->name = parseFieldName(ctx);
+    // request
+    if (ctx.tokens.next().code != TOKEN_LPAREN)
+        throw exception("Missing left parenthesis", CURRENT_TOKEN_POSITION);
+    ctx.tokens.next();
+    parseTypeInfo(ctx, proc->request);
+    if (ctx.tokens.next().code != TOKEN_RPAREN)
+        throw exception("Missing right parenthesis", CURRENT_TOKEN_POSITION);
+    // response
+    if (ctx.tokens.next().code != TOKEN_RETURNS)
+        throw exception("Missing returns", CURRENT_TOKEN_POSITION);
+    if (ctx.tokens.next().code != TOKEN_LPAREN)
+        throw exception("Missing left parenthesis", CURRENT_TOKEN_POSITION);
+    ctx.tokens.next();
+    parseTypeInfo(ctx, proc->response);
+    if (ctx.tokens.next().code != TOKEN_RPAREN)
+        throw exception("Missing right parenthesis", CURRENT_TOKEN_POSITION);
+
+    ctx.tokens.next();
+    if (ctx.tokens.current.code != TOKEN_BEGIN && ctx.tokens.current.code != TOKEN_SCOLON)
+        throw exception("Unexpected token", CURRENT_TOKEN_POSITION);
+    if (ctx.tokens.current.code == TOKEN_BEGIN && ctx.tokens.next().code != TOKEN_END)
+        throw exception("Missing right braces", CURRENT_TOKEN_POSITION);
+
+    service->procs.push_back(proc);
+}
+
+static void parseService( ProtoContext &ctx )
+{
+    auto service = new(std::nothrow) Service();
+
+    ctx.tokens.next();
+    service->name = parseFieldName(ctx);
+
+    if (ctx.tokens.next().code != TOKEN_BEGIN)
+        throw exception("Missing service body", CURRENT_TOKEN_POSITION);
+
+    while (ctx.tokens.next().code != TOKEN_END)
+    {
+        if (ctx.tokens.current.code == TOKEN_RPC)
+            parseProcedure(ctx, service);
+        else
+            throw exception("Unexpected token" + ctx.tokens.current.value, TOKEN_POSITION(ctx.tokens.current));
+    }
+
+    ctx.tree.services.push_back(service);
+}
 
 static void parseProto( ProtoContext &ctx )
 {
@@ -862,6 +950,9 @@ static void parseProto( ProtoContext &ctx )
         if (ctx.tokens.current.code == TOKEN_ENUM)
             parseEnum(ctx);
         else
+        if (ctx.tokens.current.code == TOKEN_SERVICE)
+            parseService(ctx);
+        else
         if (ctx.tokens.current.code == TOKEN_EOF)
             break;
         else
@@ -870,7 +961,6 @@ static void parseProto( ProtoContext &ctx )
         }
     } while (ctx.tokens.current.code != 0);
 }
-
 
 Proto3::~Proto3()
 {
@@ -894,6 +984,7 @@ void Proto3::parse( Proto3 &tree, std::istream &input, const std::string &fileNa
     try
     {
         parseProto(ctx);
+        tree.package = ctx.package;
         if (flags & std::ios::skipws) std::skipws(input);
     } catch (exception &ex)
     {
@@ -906,65 +997,78 @@ void Proto3::parse( Proto3 &tree, std::istream &input, const std::string &fileNa
     {
         for (auto fit = (*mit)->fields.begin(); fit != (*mit)->fields.end(); ++fit)
         {
-            if (fit->type.ref != nullptr || fit->type.id != TYPE_MESSAGE) continue;
+            if (fit->type.id != TYPE_COMPLEX) continue;
 
-            fit->type.ref = findMessage(ctx, fit->type.qname);
-            if (fit->type.ref == nullptr)
-                throw exception("Unable to find message '" + fit->type.qname + "'");
+            fit->type.mref = findMessage(ctx, fit->type.qname);
+            if (fit->type.mref == nullptr)
+                fit->type.eref = findEnum(ctx, fit->type.qname);
+            if (fit->type.mref == nullptr && fit->type.eref == nullptr)
+                    throw exception("Unable to find type '" + fit->type.qname + "'");
         }
     }
 }
 
-
-
-
-} // protogen
-
-
-#ifdef BUILD_DEBUG
-
-std::ostream &operator<<( std::ostream &out, const protogen::Token &tt )
+/*static void print( std::ostream &out,const protogen::Token &tt )
 {
     out << '[' << TOKENS[tt.code] << ": ";
     if (!tt.value.empty()) out << "value='" << tt.value << "' ";
     out << "pos=" << tt.line << ':' << tt.column << "]";
-    return out;
-}
+}*/
 
-
-std::ostream &operator<<( std::ostream &out, protogen::Field &field )
+static void print( std::ostream &out,protogen::Field &field )
 {
+    out << "    ";
     if (field.type.repeated)
         out << "repeated ";
     if (field.type.id >= TOKEN_T_DOUBLE && field.type.id <= TOKEN_T_BYTES)
         out << TYPES[field.type.id - TOKEN_T_DOUBLE];
     else
         out << field.type.qname;
-    out << ' ' << field.name << " = " << field.index << ";";
-    return out;
+    out << ' ' << field.name << " = " << field.index << ";\n";
 }
 
-
-std::ostream &operator<<( std::ostream &out, protogen::Message &message )
+static void print( std::ostream &out,protogen::Constant &entity )
 {
-    out << "message " << message.name << " {" << std::endl;;
-
-    for (auto it = message.fields.begin(); it != message.fields.end(); ++it)
-    {
-        out << *it << std::endl;;
-    }
-    out << '}' << std::endl;
-    return out;
+    out << "    " << entity.name << " = " << entity.value << ";\n";
 }
 
-
-std::ostream &operator<<( std::ostream &out, protogen::Proto3 &proto )
+static void print( std::ostream &out,  const protogen::Enum &entity )
 {
-    for (auto it = proto.messages.begin(); it != proto.messages.end(); ++it)
-    {
-        out << *it << '\n';
-    }
-    return out;
+    out << "enum " << entity.name << "\n{" << '\n';
+
+    for (auto it : entity.constants)
+        print(out, *it);
+    out << '}' << '\n';
 }
 
-#endif
+static void print( std::ostream &out,  const protogen::Message &message )
+{
+    out << "message " << message.name << "\n{" << '\n';
+    for (auto it : message.fields) print(out, it);
+    out << '}' << '\n';
+}
+
+static void print( std::ostream &out, const protogen::Procedure &entity )
+{
+    out << "    rpc " << entity.name << "(" << entity.request.qname << ")"
+        << " returns (" << entity.response.qname << ");\n";
+}
+
+static void print( std::ostream &out,  const protogen::Service &entity )
+{
+    out << "service " << entity.name << "\n{" << '\n';
+    for (auto it : entity.procs) print(out, *it);
+    out << '}' << '\n';
+}
+
+void Proto3::print( std::ostream &out ) const
+{
+    out << "syntax = \"proto3\";\n";
+    out << "package " << package << ";\n";
+    for (auto it : messages) ::protogen::print(out, *it);
+    for (auto it : enums) ::protogen::print(out, *it);
+    for (auto it : services) ::protogen::print(out, *it);
+}
+
+} // protogen
+

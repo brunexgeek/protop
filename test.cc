@@ -12,7 +12,7 @@ int main( int argc, char **argv )
 
     Proto3 tree;
     Proto3::parse(tree, input, argv[1]);
-    std::cout << tree;
+    tree.print(std::cout);
 
     return 0;
 }

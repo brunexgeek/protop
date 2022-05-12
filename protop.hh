@@ -47,22 +47,22 @@ enum FieldType
     TYPE_BOOL     = 18,
     TYPE_STRING   = 19,
     TYPE_BYTES    = 20,
-    TYPE_MESSAGE  = 21,
+    TYPE_COMPLEX  = 21,
 };
 
 #endif // PROTOGEN_FIELD_TYPES
 
 
 class Message;
+class Enum;
 
 struct TypeInfo
 {
     FieldType id;
     std::string qname;
-    Message *ref;
-    bool repeated;
-
-    TypeInfo();
+    Message *mref = nullptr;
+    Enum *eref = nullptr;
+    bool repeated = false;
 };
 
 
@@ -106,8 +106,9 @@ struct Constant
 
 struct Enum
 {
-    std::vector<Constant> fields;
+    std::vector<Constant*> constants;
     std::string name;
+    std::string qname;
     OptionMap options;
 };
 
@@ -115,23 +116,40 @@ struct Message
 {
     std::vector<Field> fields;
     std::string name;
-    std::string package;
+    std::string qname;
     OptionMap options;
 
-    std::string qualifiedName() const;
-    void splitPackage( std::vector<std::string> &out );
+    //std::string qualifiedName() const;
+    //void splitPackage( std::vector<std::string> &out );
 };
 
+struct Procedure
+{
+    std::string name;
+    TypeInfo request;
+    TypeInfo response;
+    OptionMap options;
+};
+
+struct Service
+{
+    std::string name;
+    std::vector<Procedure*> procs;
+    OptionMap options;
+};
 
 class Proto3
 {
     public:
         std::vector<Message*> messages;
+        std::vector<Service*> services;
         std::vector<Enum*> enums;
         OptionMap options;
         std::string fileName;
+        std::string package;
 
         ~Proto3();
+        void print( std::ostream &out ) const;
         static void parse( Proto3 &tree, std::istream &input, const std::string &fileName = "");
 };
 
