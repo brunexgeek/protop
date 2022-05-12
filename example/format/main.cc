@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "source/parser.hh"
+#include <protop/protop.hh>
 #include <fstream>
 
 using namespace protop;

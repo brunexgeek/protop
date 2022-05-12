@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef PROTOGEN_PROTO3_HH
-#define PROTOGEN_PROTO3_HH
+#ifndef PROTOP_API
+#define PROTOP_API
 
 #include <string>
 #include <vector>
@@ -24,9 +24,6 @@
 #include <memory>
 
 namespace protop {
-
-#ifndef PROTOGEN_FIELD_TYPES
-#define PROTOGEN_FIELD_TYPES
 
 enum FieldType
 {
@@ -47,8 +44,6 @@ enum FieldType
     TYPE_BYTES    = 20,
     TYPE_COMPLEX  = 21,
 };
-
-#endif // PROTOGEN_FIELD_TYPES
 
 class Message;
 class Enum;
@@ -143,4 +138,4 @@ class Proto
 
 } // protop
 
-#endif // PROTOGEN_PROTO3_HH
+#endif // PROTOP_API
