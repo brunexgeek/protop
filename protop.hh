@@ -87,28 +87,39 @@ struct OptionEntry
 typedef std::unordered_map<std::string, OptionEntry> OptionMap;
 
 
-class Field
+struct Field
 {
-    public:
-        TypeInfo type;
-        std::string name;
-        int index;
-        OptionMap options;
+    TypeInfo type;
+    std::string name;
+    int index;
+    OptionMap options;
 
-        Field();
+    Field();
 };
 
-
-class Message
+struct Constant
 {
-    public:
-        std::vector<Field> fields;
-        std::string name;
-        std::string package;
-        OptionMap options;
+    std::string name;
+    int value = 0;
+    OptionMap options;
+};
 
-        std::string qualifiedName() const;
-        void splitPackage( std::vector<std::string> &out );
+struct Enum
+{
+    std::vector<Constant> fields;
+    std::string name;
+    OptionMap options;
+};
+
+struct Message
+{
+    std::vector<Field> fields;
+    std::string name;
+    std::string package;
+    OptionMap options;
+
+    std::string qualifiedName() const;
+    void splitPackage( std::vector<std::string> &out );
 };
 
 
@@ -116,6 +127,7 @@ class Proto3
 {
     public:
         std::vector<Message*> messages;
+        std::vector<Enum*> enums;
         OptionMap options;
         std::string fileName;
 

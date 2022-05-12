@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Bruno Ribeiro <https://github.com/brunexgeek>
+ * Copyright 2020-2022 Bruno Ribeiro <https://github.com/brunexgeek>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include <protogen/proto3.hh>
+#include "protop.hh"
 #include <iterator>
 #include <sstream>
 
@@ -173,6 +173,27 @@ static const struct
 
 namespace protogen {
 
+exception::exception( const std::string &message, int line, int column ) :
+    line(line), column(column), message(message)
+{
+    std::stringstream ss;
+    ss << message << " (" << line << ':' << column << ')';
+    this->message = ss.str();
+}
+
+exception::~exception()
+{
+}
+
+const char *exception::what() const throw()
+{
+    return message.c_str();
+}
+
+const std::string exception::cause() const
+{
+    return message.c_str();
+}
 
 template <typename I> class InputStream
 {
@@ -600,6 +621,20 @@ static Message *findMessage( ProtoContext &ctx, const std::string &name )
     return nullptr;
 }
 
+static std::string parseFieldName( ProtoContext &ctx )
+{
+    if (ctx.tokens.current.code != TOKEN_NAME)
+    {
+        int i = 0;
+        for (; KEYWORDS[i].code != 0; ++i)
+        {
+            if (ctx.tokens.current.code == KEYWORDS[i].code) break;
+        }
+        if (KEYWORDS[i].code == 0)
+            throw exception("Missing field name", TOKEN_POSITION(ctx.tokens.current));
+    }
+    return ctx.tokens.current.value;
+}
 
 static void parseField( ProtoContext &ctx, Message &message )
 {
@@ -650,8 +685,9 @@ static void parseField( ProtoContext &ctx, Message &message )
         throw exception("Missing field type", TOKEN_POSITION(ctx.tokens.current));
 
     // name
-    if (ctx.tokens.next().code != TOKEN_NAME) throw exception("Missing field name", TOKEN_POSITION(ctx.tokens.current));
-    field.name = ctx.tokens.current.value;
+    //if (ctx.tokens.next().code != TOKEN_NAME) throw exception("Missing field name", TOKEN_POSITION(ctx.tokens.current));
+    ctx.tokens.next();
+    field.name = parseFieldName(ctx);
     // equal symbol
     if (ctx.tokens.next().code != TOKEN_EQUAL) throw exception("Expected '='", TOKEN_POSITION(ctx.tokens.current));
     // index
@@ -705,6 +741,48 @@ void Message::splitPackage(
     }
 }
 
+static void parseContant( ProtoContext &ctx, Enum &entity )
+{
+    Constant *value = new(std::nothrow) Constant();
+
+    // name
+    if (ctx.tokens.current.code != TOKEN_NAME)
+        throw exception("Missing constant name", CURRENT_TOKEN_POSITION);
+    value->name = ctx.tokens.current.value;
+    if (ctx.tokens.next().code != TOKEN_EQUAL)
+        throw exception("Missing equal sign", CURRENT_TOKEN_POSITION);
+    // value
+    if (ctx.tokens.next().code != TOKEN_INTEGER)
+        throw exception("Missing constant value", CURRENT_TOKEN_POSITION);
+    // semicolon
+    if (ctx.tokens.next().code != TOKEN_SCOLON)
+        throw exception("Missing semicolon", CURRENT_TOKEN_POSITION);
+}
+
+static void parseEnum( ProtoContext &ctx )
+{
+    if (ctx.tokens.current.code == TOKEN_ENUM && ctx.tokens.next().code == TOKEN_NAME)
+    {
+        Enum *entity = new(std::nothrow) Enum();
+        if (entity == nullptr)
+            throw exception("Out of memory");
+        //splitPackage(message.package, ctx.package);
+        entity->name = ctx.tokens.current.value;
+        if (ctx.tokens.next().code != TOKEN_BEGIN)
+            throw exception("Missing enum body", CURRENT_TOKEN_POSITION);
+
+        while (ctx.tokens.next().code != TOKEN_END)
+        {
+            if (ctx.tokens.current.code == TOKEN_OPTION)
+                parseStandardOption(ctx, entity->options);
+            else
+                parseContant(ctx, *entity);
+        }
+        ctx.tree.enums.push_back(entity);
+    }
+    else
+        throw exception("Invalid message", CURRENT_TOKEN_POSITION);
+}
 
 static void parseMessage( ProtoContext &ctx )
 {
@@ -780,6 +858,9 @@ static void parseProto( ProtoContext &ctx )
         else
         if (ctx.tokens.current.code == TOKEN_OPTION)
             parseStandardOption(ctx, ctx.tree.options);
+        else
+        if (ctx.tokens.current.code == TOKEN_ENUM)
+            parseEnum(ctx);
         else
         if (ctx.tokens.current.code == TOKEN_EOF)
             break;
