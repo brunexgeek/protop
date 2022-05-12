@@ -76,36 +76,16 @@ static const char *TOKENS[] =
 
 #endif
 
-static const char *TYPES[] =
-{
-    "double",
-    "float",
-    "int32",
-    "int64",
-    "uint32",
-    "uint64",
-    "sint32",
-    "sint64",
-    "fixed32",
-    "fixed64",
-    "sfixed32",
-    "sfixed64",
-    "bool",
-    "string",
-    "bytes",
-    nullptr,
-};
-
 namespace protop {
 
 struct Context
 {
     Tokenizer &tokens;
-    Proto3 &tree;
+    Proto &tree;
     InputStream &is;
     std::string package;
 
-    Context( Tokenizer &tokenizer, Proto3 &tree, InputStream &is ) :
+    Context( Tokenizer &tokenizer, Proto &tree, InputStream &is ) :
         tokens(tokenizer), tree(tree), is(is)
     {
     }
@@ -114,7 +94,24 @@ struct Context
 static std::string qualifiedName( Context &ctx, const std::string &name )
 {
     if (ctx.package.empty()) return name;
-    return ctx.package + '.' + name;
+    if (ctx.package.back() == '.')
+        return ctx.package + name;
+    else
+        return ctx.package + '.' + name;
+}
+
+static std::string parseName( Context &ctx, bool qualified = false )
+{
+    if (ctx.tokens.current.code != TOKEN_NAME && ctx.tokens.current.code != TOKEN_QNAME)
+    {
+        if (findKeyword(ctx.tokens.current.value) == TOKEN_NAME)
+            throw exception("Missing field name", TOKEN_POSITION(ctx.tokens.current));
+        return ctx.tokens.current.value;
+    }
+    else
+    if (ctx.tokens.current.code == TOKEN_QNAME && !qualified)
+        throw exception("Cannot use a qualified name", TOKEN_POSITION(ctx.tokens.current));
+    return ctx.tokens.current.value;
 }
 
 static OptionEntry parseOption( Context &ctx )
@@ -126,9 +123,7 @@ static OptionEntry parseOption( Context &ctx )
 
     // option name
     ctx.tokens.next();
-    if (ctx.tokens.current.code != TOKEN_NAME && ctx.tokens.current.code != TOKEN_QNAME)
-        throw exception("Missing option name", TOKEN_POSITION(ctx.tokens.current));
-    temp.name = ctx.tokens.current.value;
+    temp.name = parseName(ctx, true);
     // equal symbol
     if (ctx.tokens.next().code != TOKEN_EQUAL)
         throw exception("Expected '='", TOKEN_POSITION(ctx.tokens.current));
@@ -153,7 +148,6 @@ static OptionEntry parseOption( Context &ctx )
     return temp;
 }
 
-
 static void parseFieldOptions( Context &ctx, OptionMap &entries )
 {
     while (true)
@@ -167,7 +161,6 @@ static void parseFieldOptions( Context &ctx, OptionMap &entries )
     // give back the TOKEN_RBRACKET
     ctx.tokens.unget();
 }
-
 
 static void parseStandardOption( Context &ctx, OptionMap &entries )
 {
@@ -196,35 +189,18 @@ static std::shared_ptr<Message> findMessage( Context &ctx, const std::string &na
     return nullptr;
 }
 
-static std::string parseFieldName( Context &ctx )
-{
-    if (ctx.tokens.current.code != TOKEN_NAME)
-    {
-        if (findKeyword(ctx.tokens.current.value) == TOKEN_NAME)
-            throw exception("Missing field name", TOKEN_POSITION(ctx.tokens.current));
-    }
-    return ctx.tokens.current.value;
-}
-
 static void parseTypeInfo( Context &ctx, TypeInfo &type )
 {
     if (ctx.tokens.current.code >= TOKEN_T_DOUBLE && ctx.tokens.current.code <= TOKEN_T_BYTES)
         type.id = (FieldType) ctx.tokens.current.code;
     else
-    if (ctx.tokens.current.code == TOKEN_NAME || ctx.tokens.current.code == TOKEN_QNAME)
+    if (ctx.tokens.current.code == TOKEN_NAME || ctx.tokens.current.code == TOKEN_QNAME) // TODO: use 'parseName'
     {
         type.id = TYPE_COMPLEX;
-        if (!ctx.package.empty())
-        {
-            type.qname += ctx.package;
-            type.qname += '.';
-        }
-        type.qname += ctx.tokens.current.value;
+        type.name = ctx.tokens.current.value; // TODO: check whether is originally qualified
+        type.package = ctx.package;
         type.mref = nullptr;
         type.eref = nullptr;
-        /*type.mref = findMessage(ctx, type.qname);
-        if (type.mref == nullptr)
-            type.eref = findEnum(ctx, type.qname);*/
     }
 # if 0
     else
@@ -264,9 +240,8 @@ static void parseField( Context &ctx, Message &message )
     parseTypeInfo(ctx, field->type);
 
     // name
-    //if (ctx.tokens.next().code != TOKEN_NAME) throw exception("Missing field name", TOKEN_POSITION(ctx.tokens.current));
     ctx.tokens.next();
-    field->name = parseFieldName(ctx);
+    field->name = parseName(ctx);
     // equal symbol
     if (ctx.tokens.next().code != TOKEN_EQUAL) throw exception("Expected '='", TOKEN_POSITION(ctx.tokens.current));
     // index
@@ -301,9 +276,7 @@ static void parseContant( Context &ctx, Enum &entity )
     std::shared_ptr<Constant> value = std::make_shared<Constant>();
 
     // name
-    if (ctx.tokens.current.code != TOKEN_NAME)
-        throw exception("Missing constant name", CURRENT_TOKEN_POSITION);
-    value->name = ctx.tokens.current.value;
+    value->name = parseName(ctx);
     if (ctx.tokens.next().code != TOKEN_EQUAL)
         throw exception("Missing equal sign", CURRENT_TOKEN_POSITION);
     // value
@@ -319,10 +292,12 @@ static void parseContant( Context &ctx, Enum &entity )
 
 static void parseEnum( Context &ctx )
 {
-    if (ctx.tokens.current.code == TOKEN_ENUM && ctx.tokens.next().code == TOKEN_NAME)
+    if (ctx.tokens.current.code == TOKEN_ENUM)
     {
         std::shared_ptr<Enum> entity = std::make_shared<Enum>();
-        entity->name = ctx.tokens.current.value;
+
+        ctx.tokens.next();
+        entity->name = parseName(ctx);;
         entity->qname = qualifiedName(ctx, entity->name);
         if (ctx.tokens.next().code != TOKEN_BEGIN)
             throw exception("Missing enum body", CURRENT_TOKEN_POSITION);
@@ -337,15 +312,17 @@ static void parseEnum( Context &ctx )
         ctx.tree.enums.push_back(entity);
     }
     else
-        throw exception("Invalid message", CURRENT_TOKEN_POSITION);
+        throw exception("Expected enum", CURRENT_TOKEN_POSITION);
 }
 
 static void parseMessage( Context &ctx )
 {
-    if (ctx.tokens.current.code == TOKEN_MESSAGE && ctx.tokens.next().code == TOKEN_NAME)
+    if (ctx.tokens.current.code == TOKEN_MESSAGE)
     {
         std::shared_ptr<Message> message = std::make_shared<Message>();
-        message->name = ctx.tokens.current.value;
+
+        ctx.tokens.next();
+        message->name = parseName(ctx);
         message->qname = qualifiedName(ctx, message->name);
         if (ctx.tokens.next().code != TOKEN_BEGIN)
             throw exception("Missing message body", CURRENT_TOKEN_POSITION);
@@ -397,7 +374,7 @@ static void parseProcedure( Context &ctx, std::shared_ptr<Service> service )
 
     // name
     ctx.tokens.next();
-    proc->name = parseFieldName(ctx);
+    proc->name = parseName(ctx);
     // request
     if (ctx.tokens.next().code != TOKEN_LPAREN)
         throw exception("Missing left parenthesis", CURRENT_TOKEN_POSITION);
@@ -429,7 +406,7 @@ static void parseService( Context &ctx )
     auto service = std::make_shared<Service>();
 
     ctx.tokens.next();
-    service->name = parseFieldName(ctx);
+    service->name = parseName(ctx);
 
     if (ctx.tokens.next().code != TOKEN_BEGIN)
         throw exception("Missing service body", CURRENT_TOKEN_POSITION);
@@ -480,7 +457,7 @@ static void parseProto( Context &ctx )
     } while (ctx.tokens.current.code != 0);
 }
 
-void Proto3::parse( Proto3 &tree, std::istream &input, const std::string &fileName )
+void Proto::parse( Proto &tree, std::istream &input, const std::string &fileName )
 {
     std::ios_base::fmtflags flags = input.flags();
     std::noskipws(input);
@@ -511,68 +488,15 @@ void Proto3::parse( Proto3 &tree, std::istream &input, const std::string &fileNa
         {
             if (fit->type.id != TYPE_COMPLEX) continue;
 
-            fit->type.mref = findMessage(ctx, fit->type.qname);
+            auto qname = fit->type.package + "." + fit->type.name;
+
+            fit->type.mref = findMessage(ctx, qname);
             if (fit->type.mref == nullptr)
-                fit->type.eref = findEnum(ctx, fit->type.qname);
+                fit->type.eref = findEnum(ctx, qname);
             if (fit->type.mref == nullptr && fit->type.eref == nullptr)
-                    throw exception("Unable to find type '" + fit->type.qname + "'");
+                    throw exception("Unable to find type '" + qname + "'");
         }
     }
-}
-
-static void print( std::ostream &out, std::shared_ptr<Field> &field )
-{
-    out << "    ";
-    if (field->type.repeated)
-        out << "repeated ";
-    if (field->type.id >= TOKEN_T_DOUBLE && field->type.id <= TOKEN_T_BYTES)
-        out << TYPES[field->type.id - TOKEN_T_DOUBLE];
-    else
-        out << field->type.qname;
-    out << ' ' << field->name << " = " << field->index << ";\n";
-}
-
-static void print( std::ostream &out, std::shared_ptr<Constant> &entity )
-{
-    out << "    " << entity->name << " = " << entity->value << ";\n";
-}
-
-static void print( std::ostream &out, std::shared_ptr<Enum> &entity )
-{
-    out << "enum " << entity->name << "\n{" << '\n';
-
-    for (auto it : entity->constants)
-        print(out, it);
-    out << '}' << '\n';
-}
-
-static void print( std::ostream &out, std::shared_ptr<Message> message )
-{
-    out << "message " << message->name << "\n{" << '\n';
-    for (auto it : message->fields) print(out, it);
-    out << '}' << '\n';
-}
-
-static void print( std::ostream &out, std::shared_ptr<Procedure> entity )
-{
-    out << "    rpc " << entity->name << "(" << entity->request.qname << ")"
-        << " returns (" << entity->response.qname << ");\n";
-}
-
-static void print( std::ostream &out,  std::shared_ptr<Service> &entity )
-{
-    out << "service " << entity->name << "\n{" << '\n';
-    for (auto it : entity->procs) print(out, it);
-    out << '}' << '\n';
-}
-
-void Proto3::print( std::ostream &out ) const
-{
-    out << "syntax = \"proto3\";\n";
-    out << "package " << package << ";\n";
-    for (auto it : messages) ::protop::print(out, it);
-    for (auto it : enums) ::protop::print(out, it);
-    for (auto it : services) ::protop::print(out, it);
 }
 
 } // protogen

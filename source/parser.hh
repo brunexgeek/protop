@@ -56,7 +56,8 @@ class Enum;
 struct TypeInfo
 {
     FieldType id;
-    std::string qname;
+    std::string name;
+    std::string package;
     std::shared_ptr<Message> mref;
     std::shared_ptr<Enum> eref;
     bool repeated = false;
@@ -126,7 +127,7 @@ struct Service
     OptionMap options;
 };
 
-class Proto3
+class Proto
 {
     public:
         std::vector<std::shared_ptr<Message>> messages;
@@ -135,9 +136,9 @@ class Proto3
         OptionMap options;
         std::string fileName;
         std::string package;
+        std::string syntax;
 
-        void print( std::ostream &out ) const;
-        static void parse( Proto3 &tree, std::istream &input, const std::string &fileName = "");
+        static void parse( Proto &tree, std::istream &input, const std::string &fileName = "");
 };
 
 } // protop
