@@ -56,7 +56,21 @@
 
 namespace protop {
 
-template <typename I> class InputStream
+class InputStream
+{
+    public:
+        virtual ~InputStream() = default;
+        virtual bool eof() = 0;
+        virtual int get() = 0;
+        virtual void unget() = 0;
+        virtual int cur() const = 0;
+        virtual int line() const = 0;
+        virtual int column() const = 0;
+        virtual void skipws() = 0;
+        virtual bool expect(int expect) = 0;
+};
+
+template <typename I> class IteratorInputStream : public InputStream
 {
     protected:
         I cur_, end_;
@@ -64,17 +78,19 @@ template <typename I> class InputStream
         bool ungot_;
 
     public:
-        InputStream( const I& first, const I& last ) : cur_(first), end_(last),
+        IteratorInputStream( const I& first, const I& last ) : cur_(first), end_(last),
             last_(-1), line_(1), column_(0), ungot_(false)
         {
         }
 
-        bool eof()
+        ~IteratorInputStream() = default;
+
+        bool eof() override
         {
             return last_ == -2;
         }
 
-        int get()
+        int get() override
         {
             if (ungot_)
             {
@@ -98,7 +114,7 @@ template <typename I> class InputStream
             return last_;
         }
 
-        void unget()
+        void unget() override
         {
             if (last_ >= 0)
             {
@@ -107,13 +123,13 @@ template <typename I> class InputStream
             }
         }
 
-        int cur() const { return *cur_; }
+        int cur() const override { return *cur_; }
 
-        int line() const { return line_; }
+        int line() const override { return line_; }
 
-        int column() const { return column_; }
+        int column() const override { return column_; }
 
-        void skipws()
+        void skipws() override
         {
             while (1) {
                 int ch = get();
@@ -125,7 +141,7 @@ template <typename I> class InputStream
             }
         }
 
-        bool expect(int expect)
+        bool expect(int expect) override
         {
             if (get() != expect)
             {
@@ -143,222 +159,31 @@ struct Token
     std::string value;
     int line, column;
 
-    Token( int code = TOKEN_EOF, const std::string &value = "", int line = 1, int column = 1) :
-        code(code), value(value), line(line), column(column)
-    {
-    }
-
-    template<typename I>
-    Token( int code, const std::string &value, InputStream<I> &is ) : code(code), value(value)
-    {
-        line = is.line();
-        column = is.column() - value.length();
-    }
-
+    Token( int code = TOKEN_EOF, const std::string &value = "", int line = 1, int column = 1);
+    //Token( int code, const std::string &value, InputStream &is );
 };
 
 int findKeyword( const std::string &name );
 
-template <typename I> class Tokenizer
+class Tokenizer
 {
     public:
         Token current;
         bool ungot;
 
-        Tokenizer( InputStream<I> &is ) : ungot(false), is(is)
-        {
-        }
-
-        void unget()
-        {
-            if (ungot)
-                throw exception("Already ungot", current.line, current.column);
-            ungot = true;
-        }
-
+        Tokenizer( InputStream &is );
+        void unget();
         // TODO: create function to consume token and throw error is not from indicated type
-
-        Token next()
-        {
-            int line = 1;
-            int column = 1;
-
-            while (true)
-            {
-                if (ungot)
-                {
-                    ungot = false;
-                    return current;
-                }
-                is.skipws();
-
-                line = is.line();
-                column = is.column();
-
-                int cur = is.get();
-                if (cur < 0) break;
-
-                if (IS_LETTER(cur))
-                {
-                    is.unget();
-                    current = qname(line, column);
-                }
-                else
-                if (IS_DIGIT(cur))
-                    current = integer(cur, line, column);
-                else
-                if (cur == '/')
-                {
-                    comment(); //discarding
-                    continue;
-                }
-                else
-                if (cur == '\n' || cur == '\r')
-                    continue;
-                else
-                if (cur == '"')
-                    current = literalString(line, column);
-                else
-                if (cur == '=')
-                    current = Token(TOKEN_EQUAL, "", line, column);
-                else
-                if (cur == '{')
-                    current = Token(TOKEN_BEGIN, "", line, column);
-                else
-                if (cur == '}')
-                    current = Token(TOKEN_END, "", line, column);
-                else
-                if (cur == '(')
-                    current = Token(TOKEN_LPAREN, "", line, column);
-                else
-                if (cur == ')')
-                    current = Token(TOKEN_RPAREN, "", line, column);
-                else
-                if (cur == ';')
-                    current = Token(TOKEN_SCOLON, "", line, column);
-                else
-                if (cur == ',')
-                    current = Token(TOKEN_COMMA, "", line, column);
-                else
-                if (cur == '<')
-                    current = Token(TOKEN_LT, "", line, column);
-                else
-                if (cur == '>')
-                    current = Token(TOKEN_GT, "", line, column);
-                else
-                if (cur == '[')
-                    current = Token(TOKEN_LBRACKET, "", line, column);
-                else
-                if (cur == ']')
-                    current = Token(TOKEN_RBRACKET, "", line, column);
-                else
-                    throw exception("Invalid symbol", line, column);
-
-                return current;
-            }
-
-            return current = Token(TOKEN_EOF, "", line, column);
-        }
+        Token next();
 
     private:
-        InputStream<I> &is;
+        InputStream &is;
 
-        Token comment()
-        {
-            Token temp(TOKEN_COMMENT, "");
-            int cur = is.get();
-
-            if (cur == '/')
-            {
-                while ((cur = is.get()) != '\n') temp.value += (char) cur;
-                return temp;
-            }
-            else
-            if (cur == '*')
-            {
-                while (true)
-                {
-                    cur = is.get();
-                    if (cur == '*' && is.expect('/')) return temp;
-                    if (cur < 0) return Token();
-                    temp.value += (char) cur;
-                }
-            }
-
-            return Token();
-        }
-
-        Token qname( int line = 1, int column = 1 )
-        {
-            // capture the identifier
-            int type = TOKEN_NAME;
-            std::string name = this->name();
-            while (is.get() == '.')
-            {
-                type = TOKEN_QNAME;
-                std::string cur = this->name();
-                if (cur.length() == 0)
-                    throw exception("Invalid identifier", line, column);
-                name += '.';
-                name += cur;
-            }
-            is.unget();
-
-            // we found a keyword?
-            if (type == TOKEN_NAME)
-                type = findKeyword(name);
-
-            return Token(type, name, line, column);
-        }
-
-        std::string name()
-        {
-            std::string temp;
-            bool first = true;
-            int cur;
-            while ((cur = is.get()) >= 0)
-            {
-                if ((first && !IS_LETTER(cur)) || !IS_LETTER_OR_DIGIT(cur)) break;
-                first = false;
-                temp += (char)cur;
-            }
-            is.unget();
-            return temp;
-        }
-
-        Token integer( int first = 0, int line = 1, int column = 1 )
-        {
-            Token tt(TOKEN_INTEGER, "", line, column);
-            if (first != 0) tt.value += (char) first;
-
-            do
-            {
-                int cur = is.get();
-                if (!IS_DIGIT(cur))
-                {
-                    is.unget();
-                    return tt;
-                }
-                tt.value += (char) cur;
-            } while (true);
-
-            return tt;
-        }
-
-        Token literalString(int line = 1, int column = 1 )
-        {
-            Token tt(TOKEN_STRING, "", line, column);
-
-            do
-            {
-                int cur = is.get();
-                if (cur == '\n' || cur == 0) return Token();
-                if (cur == '"') return tt;
-                tt.value += (char) cur;
-            } while (true);
-
-            return tt;
-        }
+        Token comment();
+        Token qname( int line = 1, int column = 1 );
+        std::string name();
+        Token integer( int first = 0, int line = 1, int column = 1 );
+        Token literalString(int line = 1, int column = 1 );
 };
 
 } // protop

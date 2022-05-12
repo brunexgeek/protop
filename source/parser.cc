@@ -102,23 +102,21 @@ static const char *TYPES[] =
 namespace protop {
 
 
-
-template<typename T>
 struct Context
 {
-    Tokenizer<T> &tokens;
+    Tokenizer &tokens;
     Proto3 &tree;
-    InputStream<T> &is;
+    InputStream &is;
     std::string package;
 
-    Context( Tokenizer<T> &tokenizer, Proto3 &tree, InputStream<T> &is ) :
+    Context( Tokenizer &tokenizer, Proto3 &tree, InputStream &is ) :
         tokens(tokenizer), tree(tree), is(is)
     {
     }
 };
 
 
-typedef Context< std::istream_iterator<char> > ProtoContext;
+typedef Context ProtoContext;
 
 } // namespace protogen
 
@@ -543,8 +541,8 @@ void Proto3::parse( Proto3 &tree, std::istream &input, const std::string &fileNa
     std::istream_iterator<char> end;
     std::istream_iterator<char> begin(input);
 
-    InputStream< std::istream_iterator<char> > is(begin, end);
-    Tokenizer< std::istream_iterator<char> > tok(is);
+    IteratorInputStream< std::istream_iterator<char> > is(begin, end);
+    Tokenizer tok(is);
 
     ProtoContext ctx(tok, tree, is);
     tree.fileName = fileName;
