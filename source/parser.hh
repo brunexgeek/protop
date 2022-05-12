@@ -17,16 +17,13 @@
 #ifndef PROTOGEN_PROTO3_HH
 #define PROTOGEN_PROTO3_HH
 
-
 #include <string>
 #include <vector>
 #include <unordered_map>
 #include <iostream>
 #include <memory>
 
-
 namespace protop {
-
 
 #ifndef PROTOGEN_FIELD_TYPES
 #define PROTOGEN_FIELD_TYPES
@@ -53,7 +50,6 @@ enum FieldType
 
 #endif // PROTOGEN_FIELD_TYPES
 
-
 class Message;
 class Enum;
 
@@ -66,7 +62,6 @@ struct TypeInfo
     bool repeated = false;
 };
 
-
 enum class OptionType
 {
     IDENTIFIER,
@@ -74,7 +69,6 @@ enum class OptionType
     INTEGER,
     BOOLEAN
 };
-
 
 struct OptionEntry
 {
@@ -84,18 +78,14 @@ struct OptionEntry
     int line;
 };
 
-
 typedef std::unordered_map<std::string, OptionEntry> OptionMap;
-
 
 struct Field
 {
     TypeInfo type;
     std::string name;
-    int index;
+    int index = 0;
     OptionMap options;
-
-    Field();
 };
 
 struct Constant
@@ -119,9 +109,6 @@ struct Message
     std::string name;
     std::string qname;
     OptionMap options;
-
-    //std::string qualifiedName() const;
-    //void splitPackage( std::vector<std::string> &out );
 };
 
 struct Procedure

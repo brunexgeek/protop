@@ -96,11 +96,7 @@ static const char *TYPES[] =
     nullptr,
 };
 
-
-
-
 namespace protop {
-
 
 struct Context
 {
@@ -115,24 +111,13 @@ struct Context
     }
 };
 
-
-typedef Context ProtoContext;
-
-} // namespace protogen
-
-namespace protop {
-
-static std::string qualifiedName( ProtoContext &ctx, const std::string &name )
+static std::string qualifiedName( Context &ctx, const std::string &name )
 {
     if (ctx.package.empty()) return name;
     return ctx.package + '.' + name;
 }
 
-Field::Field() : index(0)
-{
-}
-
-static OptionEntry parseOption( ProtoContext &ctx )
+static OptionEntry parseOption( Context &ctx )
 {
     // the token 'option' is already consumed at this point
     OptionEntry temp;
@@ -169,7 +154,7 @@ static OptionEntry parseOption( ProtoContext &ctx )
 }
 
 
-static void parseFieldOptions( ProtoContext &ctx, OptionMap &entries )
+static void parseFieldOptions( Context &ctx, OptionMap &entries )
 {
     while (true)
     {
@@ -184,7 +169,7 @@ static void parseFieldOptions( ProtoContext &ctx, OptionMap &entries )
 }
 
 
-static void parseStandardOption( ProtoContext &ctx, OptionMap &entries )
+static void parseStandardOption( Context &ctx, OptionMap &entries )
 {
     // the token 'option' is already consumed at this point
 
@@ -197,21 +182,21 @@ static void parseStandardOption( ProtoContext &ctx, OptionMap &entries )
     entries[option.name] = option;
 }
 
-static std::shared_ptr<Enum> findEnum( ProtoContext &ctx, const std::string &name )
+static std::shared_ptr<Enum> findEnum( Context &ctx, const std::string &name )
 {
     for (auto it = ctx.tree.enums.begin(); it != ctx.tree.enums.end(); ++it)
         if ((*it)->qname == name) return *it;
     return nullptr;
 }
 
-static std::shared_ptr<Message> findMessage( ProtoContext &ctx, const std::string &name )
+static std::shared_ptr<Message> findMessage( Context &ctx, const std::string &name )
 {
     for (auto it = ctx.tree.messages.begin(); it != ctx.tree.messages.end(); ++it)
         if ((*it)->qname == name) return *it;
     return nullptr;
 }
 
-static std::string parseFieldName( ProtoContext &ctx )
+static std::string parseFieldName( Context &ctx )
 {
     if (ctx.tokens.current.code != TOKEN_NAME)
     {
@@ -221,7 +206,7 @@ static std::string parseFieldName( ProtoContext &ctx )
     return ctx.tokens.current.value;
 }
 
-static void parseTypeInfo( ProtoContext &ctx, TypeInfo &type )
+static void parseTypeInfo( Context &ctx, TypeInfo &type )
 {
     if (ctx.tokens.current.code >= TOKEN_T_DOUBLE && ctx.tokens.current.code <= TOKEN_T_BYTES)
         type.id = (FieldType) ctx.tokens.current.code;
@@ -263,7 +248,7 @@ static void parseTypeInfo( ProtoContext &ctx, TypeInfo &type )
         throw exception("Missing type", TOKEN_POSITION(ctx.tokens.current));
 }
 
-static void parseField( ProtoContext &ctx, Message &message )
+static void parseField( Context &ctx, Message &message )
 {
     std::shared_ptr<Field> field = std::make_shared<Field>();
 
@@ -311,31 +296,7 @@ static void parseField( ProtoContext &ctx, Message &message )
     message.fields.push_back(field);
 }
 
-/*
-void Message::splitPackage(
-    std::vector<std::string> &out )
-{
-    std::string current;
-
-    const char *ptr = package.c_str();
-    while (true)
-    {
-        if (*ptr == '.' || *ptr == 0)
-        {
-            if (!current.empty())
-            {
-                out.push_back(current);
-                current.clear();
-            }
-            if (*ptr == 0) break;
-        }
-        else
-            current += *ptr;
-        ++ptr;
-    }
-}
-*/
-static void parseContant( ProtoContext &ctx, Enum &entity )
+static void parseContant( Context &ctx, Enum &entity )
 {
     std::shared_ptr<Constant> value = std::make_shared<Constant>();
 
@@ -356,7 +317,7 @@ static void parseContant( ProtoContext &ctx, Enum &entity )
     entity.constants.push_back(value);
 }
 
-static void parseEnum( ProtoContext &ctx )
+static void parseEnum( Context &ctx )
 {
     if (ctx.tokens.current.code == TOKEN_ENUM && ctx.tokens.next().code == TOKEN_NAME)
     {
@@ -379,7 +340,7 @@ static void parseEnum( ProtoContext &ctx )
         throw exception("Invalid message", CURRENT_TOKEN_POSITION);
 }
 
-static void parseMessage( ProtoContext &ctx )
+static void parseMessage( Context &ctx )
 {
     if (ctx.tokens.current.code == TOKEN_MESSAGE && ctx.tokens.next().code == TOKEN_NAME)
     {
@@ -403,7 +364,7 @@ static void parseMessage( ProtoContext &ctx )
 }
 
 
-static void parsePackage( ProtoContext &ctx )
+static void parsePackage( Context &ctx )
 {
     Token tt = ctx.tokens.next();
     if ((tt.code == TOKEN_NAME || tt.code == TOKEN_QNAME) && ctx.tokens.next().code == TOKEN_SCOLON)
@@ -415,7 +376,7 @@ static void parsePackage( ProtoContext &ctx )
 }
 
 
-static void parseSyntax( ProtoContext &ctx )
+static void parseSyntax( Context &ctx )
 {
     // the token 'syntax' is already consumed at this point
 
@@ -430,7 +391,7 @@ static void parseSyntax( ProtoContext &ctx )
         throw exception("Invalid syntax", CURRENT_TOKEN_POSITION);
 }
 
-static void parseProcedure( ProtoContext &ctx, std::shared_ptr<Service> service )
+static void parseProcedure( Context &ctx, std::shared_ptr<Service> service )
 {
     auto proc = std::make_shared<Procedure>();
 
@@ -463,7 +424,7 @@ static void parseProcedure( ProtoContext &ctx, std::shared_ptr<Service> service 
     service->procs.push_back(proc);
 }
 
-static void parseService( ProtoContext &ctx )
+static void parseService( Context &ctx )
 {
     auto service = std::make_shared<Service>();
 
@@ -484,7 +445,7 @@ static void parseService( ProtoContext &ctx )
     ctx.tree.services.push_back(service);
 }
 
-static void parseProto( ProtoContext &ctx )
+static void parseProto( Context &ctx )
 {
     do
     {
@@ -529,7 +490,7 @@ void Proto3::parse( Proto3 &tree, std::istream &input, const std::string &fileNa
     IteratorInputStream< std::istream_iterator<char> > is(begin, end);
     Tokenizer tok(is);
 
-    ProtoContext ctx(tok, tree, is);
+    Context ctx(tok, tree, is);
     tree.fileName = fileName;
 
     try
