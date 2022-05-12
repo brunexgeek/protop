@@ -24,7 +24,7 @@
 #include <iostream>
 
 
-namespace protogen {
+namespace protop {
 
 
 #ifndef PROTOGEN_FIELD_TYPES
@@ -153,26 +153,6 @@ class Proto3
         static void parse( Proto3 &tree, std::istream &input, const std::string &fileName = "");
 };
 
-class Token;
-
-class exception : public std::exception
-{
-    public:
-        int line, column;
-
-        exception( const std::string &message, int line = 1, int column = 1 );
-        virtual ~exception();
-        const char *what() const throw();
-        const std::string cause() const;
-    private:
-        std::string message;
-};
-
-} // protogen
-
-std::ostream &operator<<( std::ostream &out, protogen::Proto3 &proto );
-std::ostream &operator<<( std::ostream &out, protogen::Message &message );
-std::ostream &operator<<( std::ostream &out, protogen::Field &field );
-
+} // protop
 
 #endif // PROTOGEN_PROTO3_HH

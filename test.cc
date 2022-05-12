@@ -1,7 +1,7 @@
-#include "protop.hh"
+#include "source/parser.hh"
 #include <fstream>
 
-using namespace protogen;
+using namespace protop;
 
 int main( int argc, char **argv )
 {
