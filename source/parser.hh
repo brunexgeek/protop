@@ -22,6 +22,7 @@
 #include <vector>
 #include <unordered_map>
 #include <iostream>
+#include <memory>
 
 
 namespace protop {
@@ -60,8 +61,8 @@ struct TypeInfo
 {
     FieldType id;
     std::string qname;
-    Message *mref = nullptr;
-    Enum *eref = nullptr;
+    std::shared_ptr<Message> mref;
+    std::shared_ptr<Enum> eref;
     bool repeated = false;
 };
 
@@ -106,7 +107,7 @@ struct Constant
 
 struct Enum
 {
-    std::vector<Constant*> constants;
+    std::vector<std::shared_ptr<Constant>> constants;
     std::string name;
     std::string qname;
     OptionMap options;
@@ -114,7 +115,7 @@ struct Enum
 
 struct Message
 {
-    std::vector<Field> fields;
+    std::vector<std::shared_ptr<Field>> fields;
     std::string name;
     std::string qname;
     OptionMap options;
@@ -134,21 +135,20 @@ struct Procedure
 struct Service
 {
     std::string name;
-    std::vector<Procedure*> procs;
+    std::vector<std::shared_ptr<Procedure>> procs;
     OptionMap options;
 };
 
 class Proto3
 {
     public:
-        std::vector<Message*> messages;
-        std::vector<Service*> services;
-        std::vector<Enum*> enums;
+        std::vector<std::shared_ptr<Message>> messages;
+        std::vector<std::shared_ptr<Service>> services;
+        std::vector<std::shared_ptr<Enum>> enums;
         OptionMap options;
         std::string fileName;
         std::string package;
 
-        ~Proto3();
         void print( std::ostream &out ) const;
         static void parse( Proto3 &tree, std::istream &input, const std::string &fileName = "");
 };

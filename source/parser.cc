@@ -197,14 +197,14 @@ static void parseStandardOption( ProtoContext &ctx, OptionMap &entries )
     entries[option.name] = option;
 }
 
-static Enum *findEnum( ProtoContext &ctx, const std::string &name )
+static std::shared_ptr<Enum> findEnum( ProtoContext &ctx, const std::string &name )
 {
     for (auto it = ctx.tree.enums.begin(); it != ctx.tree.enums.end(); ++it)
         if ((*it)->qname == name) return *it;
     return nullptr;
 }
 
-static Message *findMessage( ProtoContext &ctx, const std::string &name )
+static std::shared_ptr<Message> findMessage( ProtoContext &ctx, const std::string &name )
 {
     for (auto it = ctx.tree.messages.begin(); it != ctx.tree.messages.end(); ++it)
         if ((*it)->qname == name) return *it;
@@ -265,35 +265,35 @@ static void parseTypeInfo( ProtoContext &ctx, TypeInfo &type )
 
 static void parseField( ProtoContext &ctx, Message &message )
 {
-    Field field;
+    std::shared_ptr<Field> field = std::make_shared<Field>();
 
     if (ctx.tokens.current.code == TOKEN_REPEATED)
     {
-        field.type.repeated = true;
+        field->type.repeated = true;
         ctx.tokens.next();
     }
     else
-        field.type.repeated = false;
+        field->type.repeated = false;
 
     // type
-    parseTypeInfo(ctx, field.type);
+    parseTypeInfo(ctx, field->type);
 
     // name
     //if (ctx.tokens.next().code != TOKEN_NAME) throw exception("Missing field name", TOKEN_POSITION(ctx.tokens.current));
     ctx.tokens.next();
-    field.name = parseFieldName(ctx);
+    field->name = parseFieldName(ctx);
     // equal symbol
     if (ctx.tokens.next().code != TOKEN_EQUAL) throw exception("Expected '='", TOKEN_POSITION(ctx.tokens.current));
     // index
     if (ctx.tokens.next().code != TOKEN_INTEGER) throw exception("Missing field index", TOKEN_POSITION(ctx.tokens.current));
-    field.index = (int) strtol(ctx.tokens.current.value.c_str(), nullptr, 10);
+    field->index = (int) strtol(ctx.tokens.current.value.c_str(), nullptr, 10);
 
     ctx.tokens.next();
 
     // options
     if (ctx.tokens.current.code == TOKEN_LBRACKET)
     {
-        parseFieldOptions(ctx, field.options);
+        parseFieldOptions(ctx, field->options);
         if (ctx.tokens.next().code != TOKEN_RBRACKET)
             throw exception("Expected ']'", TOKEN_POSITION(ctx.tokens.current));
         ctx.tokens.next();
@@ -304,9 +304,9 @@ static void parseField( ProtoContext &ctx, Message &message )
         throw exception("Expected ';'", TOKEN_POSITION(ctx.tokens.current));
 
     // check for repeated field indices
-    for (auto it = message.fields.begin(); it != message.fields.end(); it++)
-        if (it->index == field.index)
-            throw exception("Field '" + it->name + "' has the same index as '" + field.name + "'", CURRENT_TOKEN_POSITION);
+    for (auto item : message.fields)
+        if (item->index == field->index)
+            throw exception("Field '" + item->name + "' has the same index as '" + field->name + "'", CURRENT_TOKEN_POSITION);
 
     message.fields.push_back(field);
 }
@@ -337,7 +337,7 @@ void Message::splitPackage(
 */
 static void parseContant( ProtoContext &ctx, Enum &entity )
 {
-    Constant *value = new(std::nothrow) Constant();
+    std::shared_ptr<Constant> value = std::make_shared<Constant>();
 
     // name
     if (ctx.tokens.current.code != TOKEN_NAME)
@@ -360,13 +360,9 @@ static void parseEnum( ProtoContext &ctx )
 {
     if (ctx.tokens.current.code == TOKEN_ENUM && ctx.tokens.next().code == TOKEN_NAME)
     {
-        Enum *entity = new(std::nothrow) Enum();
-        if (entity == nullptr)
-            throw exception("Out of memory");
-        //splitPackage(message.package, ctx.package);
+        std::shared_ptr<Enum> entity = std::make_shared<Enum>();
         entity->name = ctx.tokens.current.value;
         entity->qname = qualifiedName(ctx, entity->name);
-        std::cerr << "Found " << entity->qname << '\n';
         if (ctx.tokens.next().code != TOKEN_BEGIN)
             throw exception("Missing enum body", CURRENT_TOKEN_POSITION);
 
@@ -387,14 +383,9 @@ static void parseMessage( ProtoContext &ctx )
 {
     if (ctx.tokens.current.code == TOKEN_MESSAGE && ctx.tokens.next().code == TOKEN_NAME)
     {
-        Message *message = new(std::nothrow) Message();
-        if (message == nullptr)
-            throw exception("Out of memory");
-        //splitPackage(message.package, ctx.package);
-        //message->package = ctx.package;
+        std::shared_ptr<Message> message = std::make_shared<Message>();
         message->name = ctx.tokens.current.value;
         message->qname = qualifiedName(ctx, message->name);
-        std::cerr << "Found " << message->qname << '\n';
         if (ctx.tokens.next().code != TOKEN_BEGIN)
             throw exception("Missing message body", CURRENT_TOKEN_POSITION);
 
@@ -439,9 +430,9 @@ static void parseSyntax( ProtoContext &ctx )
         throw exception("Invalid syntax", CURRENT_TOKEN_POSITION);
 }
 
-static void parseProcedure( ProtoContext &ctx, Service *service )
+static void parseProcedure( ProtoContext &ctx, std::shared_ptr<Service> service )
 {
-    auto proc = new(std::nothrow) Procedure();
+    auto proc = std::make_shared<Procedure>();
 
     // name
     ctx.tokens.next();
@@ -474,7 +465,7 @@ static void parseProcedure( ProtoContext &ctx, Service *service )
 
 static void parseService( ProtoContext &ctx )
 {
-    auto service = new(std::nothrow) Service();
+    auto service = std::make_shared<Service>();
 
     ctx.tokens.next();
     service->name = parseFieldName(ctx);
@@ -528,12 +519,6 @@ static void parseProto( ProtoContext &ctx )
     } while (ctx.tokens.current.code != 0);
 }
 
-Proto3::~Proto3()
-{
-    for (auto it = messages.begin(); it != messages.end(); ++it) delete *it;
-}
-
-
 void Proto3::parse( Proto3 &tree, std::istream &input, const std::string &fileName )
 {
     std::ios_base::fmtflags flags = input.flags();
@@ -559,9 +544,9 @@ void Proto3::parse( Proto3 &tree, std::istream &input, const std::string &fileNa
     }
 
     // check if we have unresolved types
-    for (auto mit = tree.messages.begin(); mit != tree.messages.end(); ++mit)
+    for (auto mit : tree.messages)
     {
-        for (auto fit = (*mit)->fields.begin(); fit != (*mit)->fields.end(); ++fit)
+        for (auto fit : mit->fields)
         {
             if (fit->type.id != TYPE_COMPLEX) continue;
 
@@ -574,56 +559,49 @@ void Proto3::parse( Proto3 &tree, std::istream &input, const std::string &fileNa
     }
 }
 
-/*static void print( std::ostream &out,const protogen::Token &tt )
-{
-    out << '[' << TOKENS[tt.code] << ": ";
-    if (!tt.value.empty()) out << "value='" << tt.value << "' ";
-    out << "pos=" << tt.line << ':' << tt.column << "]";
-}*/
-
-static void print( std::ostream &out,Field &field )
+static void print( std::ostream &out, std::shared_ptr<Field> &field )
 {
     out << "    ";
-    if (field.type.repeated)
+    if (field->type.repeated)
         out << "repeated ";
-    if (field.type.id >= TOKEN_T_DOUBLE && field.type.id <= TOKEN_T_BYTES)
-        out << TYPES[field.type.id - TOKEN_T_DOUBLE];
+    if (field->type.id >= TOKEN_T_DOUBLE && field->type.id <= TOKEN_T_BYTES)
+        out << TYPES[field->type.id - TOKEN_T_DOUBLE];
     else
-        out << field.type.qname;
-    out << ' ' << field.name << " = " << field.index << ";\n";
+        out << field->type.qname;
+    out << ' ' << field->name << " = " << field->index << ";\n";
 }
 
-static void print( std::ostream &out,Constant &entity )
+static void print( std::ostream &out, std::shared_ptr<Constant> &entity )
 {
-    out << "    " << entity.name << " = " << entity.value << ";\n";
+    out << "    " << entity->name << " = " << entity->value << ";\n";
 }
 
-static void print( std::ostream &out,  const Enum &entity )
+static void print( std::ostream &out, std::shared_ptr<Enum> &entity )
 {
-    out << "enum " << entity.name << "\n{" << '\n';
+    out << "enum " << entity->name << "\n{" << '\n';
 
-    for (auto it : entity.constants)
-        print(out, *it);
+    for (auto it : entity->constants)
+        print(out, it);
     out << '}' << '\n';
 }
 
-static void print( std::ostream &out,  const Message &message )
+static void print( std::ostream &out, std::shared_ptr<Message> message )
 {
-    out << "message " << message.name << "\n{" << '\n';
-    for (auto it : message.fields) print(out, it);
+    out << "message " << message->name << "\n{" << '\n';
+    for (auto it : message->fields) print(out, it);
     out << '}' << '\n';
 }
 
-static void print( std::ostream &out, const Procedure &entity )
+static void print( std::ostream &out, std::shared_ptr<Procedure> entity )
 {
-    out << "    rpc " << entity.name << "(" << entity.request.qname << ")"
-        << " returns (" << entity.response.qname << ");\n";
+    out << "    rpc " << entity->name << "(" << entity->request.qname << ")"
+        << " returns (" << entity->response.qname << ");\n";
 }
 
-static void print( std::ostream &out,  const Service &entity )
+static void print( std::ostream &out,  std::shared_ptr<Service> &entity )
 {
-    out << "service " << entity.name << "\n{" << '\n';
-    for (auto it : entity.procs) print(out, *it);
+    out << "service " << entity->name << "\n{" << '\n';
+    for (auto it : entity->procs) print(out, it);
     out << '}' << '\n';
 }
 
@@ -631,9 +609,9 @@ void Proto3::print( std::ostream &out ) const
 {
     out << "syntax = \"proto3\";\n";
     out << "package " << package << ";\n";
-    for (auto it : messages) ::protop::print(out, *it);
-    for (auto it : enums) ::protop::print(out, *it);
-    for (auto it : services) ::protop::print(out, *it);
+    for (auto it : messages) ::protop::print(out, it);
+    for (auto it : enums) ::protop::print(out, it);
+    for (auto it : services) ::protop::print(out, it);
 }
 
 } // protogen
