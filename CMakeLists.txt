@@ -53,6 +53,10 @@ add_executable(example_format
     "example/format/main.cc")
 target_link_libraries(example_format libprotop)
 
+add_executable(example_grpc_facade
+    "example/grpc_facade/main.cc")
+target_link_libraries(example_grpc_facade libprotop)
+
 INSTALL(TARGETS libprotop
     PUBLIC_HEADER DESTINATION include/protop
     LIBRARY DESTINATION lib
