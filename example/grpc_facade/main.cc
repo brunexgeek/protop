@@ -16,6 +16,7 @@
 
 #include <protop/protop.hh>
 #include <fstream>
+#include <vector>
 
 using namespace protop;
 

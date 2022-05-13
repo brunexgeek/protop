@@ -18,6 +18,8 @@
 #include "tokenizer.hh"
 #include <iterator>
 #include <sstream>
+#include <list>
+#include <set>
 
 #define IS_VALID_TYPE(x)       ( (x) >= protogen::TYPE_DOUBLE && (x) <= protogen::TYPE_MESSAGE )
 #define TOKEN_POSITION(t)      (t).line, (t).column
@@ -457,6 +459,43 @@ static void parseProto( Context &ctx )
     } while (ctx.tokens.current.code != 0);
 }
 
+typedef std::list<std::shared_ptr<Message>> MessageList;
+typedef std::set<std::shared_ptr<Message>> MessageSet;
+
+static bool contains( const MessageList &items, const std::shared_ptr<Message> message )
+{
+    for (auto mi = items.begin(); mi != items.end(); ++mi)
+        if (*mi == message) return true;
+    return false;
+}
+
+static void sort( MessageList &items, MessageSet &pending, std::shared_ptr<Message> message )
+{
+    if (pending.find(message) != pending.end())
+        throw exception("Circular reference with " + message->name);
+    //if (contains(items, message)) return; // already processed
+
+    pending.insert(message);
+    for (auto fi : message->fields)
+    {
+        if (fi->type.mref == nullptr || fi->type.mref == message)
+            continue;
+        if (!contains(items, fi->type.mref))
+            sort(items, pending, fi->type.mref);
+    }
+    items.push_back(message);
+    pending.erase(message);
+}
+
+static void sort_messages( Context &ctx )
+{
+    MessageList items;
+    MessageSet pending;
+    for (auto mi : ctx.tree.messages)
+        sort(items, pending, mi);
+    ctx.tree.messages.swap(items);
+}
+
 void Proto::parse( Proto &tree, std::istream &input, const std::string &fileName )
 {
     std::ios_base::fmtflags flags = input.flags();
@@ -497,6 +536,8 @@ void Proto::parse( Proto &tree, std::istream &input, const std::string &fileName
                     throw exception("Unable to find type '" + qname + "'");
         }
     }
+    // sort messages and check for circular references
+    sort_messages(ctx);
 }
 
 } // protogen

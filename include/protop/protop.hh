@@ -18,7 +18,7 @@
 #define PROTOP_API
 
 #include <string>
-#include <vector>
+#include <list>
 #include <unordered_map>
 #include <iostream>
 #include <memory>
@@ -93,7 +93,7 @@ struct Constant
 
 struct Enum
 {
-    std::vector<std::shared_ptr<Constant>> constants;
+    std::list<std::shared_ptr<Constant>> constants;
     std::string name;
     std::string qname;
     OptionMap options;
@@ -101,7 +101,7 @@ struct Enum
 
 struct Message
 {
-    std::vector<std::shared_ptr<Field>> fields;
+    std::list<std::shared_ptr<Field>> fields;
     std::string name;
     std::string qname;
     OptionMap options;
@@ -118,16 +118,16 @@ struct Procedure
 struct Service
 {
     std::string name;
-    std::vector<std::shared_ptr<Procedure>> procs;
+    std::list<std::shared_ptr<Procedure>> procs;
     OptionMap options;
 };
 
 class Proto
 {
     public:
-        std::vector<std::shared_ptr<Message>> messages;
-        std::vector<std::shared_ptr<Service>> services;
-        std::vector<std::shared_ptr<Enum>> enums;
+        std::list<std::shared_ptr<Message>> messages;
+        std::list<std::shared_ptr<Service>> services;
+        std::list<std::shared_ptr<Enum>> enums;
         OptionMap options;
         std::string fileName;
         std::string package;
