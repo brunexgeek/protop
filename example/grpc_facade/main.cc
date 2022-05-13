@@ -30,21 +30,19 @@ struct Context
     std::vector<std::string> nspace;
 };
 
-static const char *AUTO_NEW = "\
-template<class T> \n\
-class auto_new \n\
-{ \n\
-    public: \n\
-        T &operator=( const T &that ) { if (!o_) o_ = new T(); *o_ = that; return *o_; } \n\
-        T *operator->() { if (!o_) o_ = new T(); return o_; } \n\
-        T *operator->() const { if (!o_) o_ = new T(); return o_; } \n\
-        T &operator*() { if (!o_) o_ = new T(); return *o_; } \n\
-        T &operator*() const { if (!o_) o_ = new T(); return *o_; } \n\
-        bool operator==( std::nullptr_t ) const { return o_ == nullptr; } \n\
-        operator bool() const { return o_ == nullptr; } \n\
-    protected: \n\
-        mutable T *o_ = nullptr; \n\
-};\n";
+static const char *TEMPLATES = "\
+template<class T, class V> void complex_from_grpc(T&a, V&b, size_t s) \n\
+{\n\
+\ta.resize(s);\n\
+\tauto it = a.begin();\n\
+\tfor (auto item : b) { it->from_grpc(item); ++it; };\n\
+}\n\
+template<class T, class V> void primitive_from_grpc(T&a, V&b, size_t s) \n\
+{\n\
+\ta.resize(s);\n\
+\tauto it = a.begin();\n\
+\tfor (auto item : b) { *it = item; ++it; };\n\
+}\n";
 
 static const char *TYPES[] =
 {
@@ -127,14 +125,8 @@ static void generate_field( Context &ctx, std::shared_ptr<Field> field )
     if (field->type.eref != nullptr)
         ctx.header << "int32_t";
     else
-    {
-        if (!field->type.repeated)
-            ctx.header << "auto_new<";
         ctx.header << field->type.name;
-        if (!field->type.repeated)
-            ctx.header << ">";
-    }
-        //out << "std::shared_ptr<" << field->type.name << ">";
+
     if (field->type.repeated)
         ctx.header << ">";
     ctx.header << ' ' << field->name;
@@ -190,7 +182,7 @@ static void generate_to_grpc( Context &ctx, std::shared_ptr<Message> message )
         if (it->type.id == TYPE_COMPLEX)
         {
             if (it->type.mref != nullptr)
-                ctx.source << "\tif (" << it->name << ") " << it->name << "->to_grpc(*that.mutable_" << it->name << "());\n";
+                ctx.source << "\t" << it->name << ".to_grpc(*that.mutable_" << it->name << "());\n";
             else
                 ctx.source << "\tthat.set_" << it->name << "( static_cast<" << ctx.grpcns << "::" << it->type.name << ">(" << it->name << "));\n";
         }
@@ -201,6 +193,21 @@ static void generate_to_grpc( Context &ctx, std::shared_ptr<Message> message )
     ctx.source << "}\n";
 }
 
+static void generate_operators( Context &ctx, std::shared_ptr<Message> message )
+{
+    // not equal
+    ctx.source << "bool " << message->name << "::operator!=( const " << message->name << "&that ) const\n{\n"
+        << "\treturn !(*this == that);\n}\n";
+    // equal
+    ctx.source << "bool " << message->name << "::operator==( const " << message->name << "&that ) const\n{\n";
+    if (message->fields.size() == 0) ctx.source << "\t(void) that;\n";
+    ctx.source << "\treturn\n";
+    for (auto it : message->fields)
+        ctx.source << "\t\t" << it->name << " == that." << it->name << " &&\n";
+    ctx.source << "\t\ttrue;\n";
+    ctx.source << "}\n";
+}
+
 static void generate_from_grpc( Context &ctx, std::shared_ptr<Message> message )
 {
     ctx.source << "void " << message->name << "::from_grpc( const " << ctx.grpcns << "::" << message->name << "& that )\n{\n";
@@ -208,12 +215,16 @@ static void generate_from_grpc( Context &ctx, std::shared_ptr<Message> message )
     {
         if (it->type.repeated)
         {
-            ctx.source << "\t{\n\t\t" << it->name << ".resize(that." << it->name << "_size());\n\t\tauto it = " << it->name << ".begin();\n";
+            /*ctx.source << "\t{\n\t\t" << it->name << ".resize(that." << it->name << "_size());\n\t\tauto it = " << it->name << ".begin();\n";
             ctx.source << "\t\tfor (auto item : that." << it->name << "())";
             if (it->type.id == TYPE_COMPLEX)
                 ctx.source << " { it->from_grpc(item); ++it; };\n\t}\n";
             else
-                ctx.source << " { *it = item; ++it; };\n\t}\n";
+                ctx.source << " { *it = item; ++it; };\n\t}\n";*/
+            const char *tmpl = "complex_from_grpc";
+            if (it->type.id != TYPE_COMPLEX) tmpl = "primitive_from_grpc";
+            ctx.source << "\t"<< tmpl << "(" << it->name << ", that." << it->name << "(), that." << it->name << "_size());\n";
+
         }
         else
         if (it->type.id == TYPE_COMPLEX)
@@ -221,7 +232,7 @@ static void generate_from_grpc( Context &ctx, std::shared_ptr<Message> message )
             if (it->type.mref != nullptr)
             {
                 auto native_type = get_native_type(it->type.id, it->type.name, it->type.eref != nullptr, false, false);
-                ctx.source << "\t"<< it->name << "->from_grpc( that." << it->name << "() );\n";
+                ctx.source << "\t"<< it->name << ".from_grpc( that." << it->name << "() );\n";
             }
             else
                 ctx.source << "\t" << it->name << " = static_cast<int32_t>(that." << it->name << "());\n";
@@ -240,14 +251,16 @@ static void generate_message_decl( Context &ctx, std::shared_ptr<Message> messag
     // fields
     for (auto it : message->fields) generate_field(ctx, it);
     // functions
-    ctx.header << "\t" << message->name << "() = default;\n";
+    ctx.header << "\n\t" << message->name << "() = default;\n";
     ctx.header << "\t" << message->name << "( " << message->name << "&& ) = default;\n";
     ctx.header << "\t" << message->name << "( const " << message->name << "& ) = default;\n";
     ctx.header << "\t" << message->name << "( const " << ctx.grpcns << "::" << message->name << "& that ) { this->from_grpc(that); };\n";
-    ctx.header << "\t" << message->name << " &operator=( const " << message->name << "& that ) = default;\n";
+    ctx.header << "\tbool operator!=( const " << message->name << "& ) const;\n";
+    ctx.header << "\tbool operator==( const " << message->name << "& ) const;\n";
+    ctx.header << "\t" << message->name << " &operator=( const " << message->name << "& ) = default;\n";
     ctx.header << "\t" << message->name << " &operator=( const " << ctx.grpcns << "::" << message->name << "& that ) { this->from_grpc(that); return *this; };\n";
-    ctx.header << "\tvoid to_grpc( " << ctx.grpcns << "::" << message->name << "& that ) const;\n";
-    ctx.header << "\tvoid from_grpc( const " << ctx.grpcns << "::" << message->name << "& that );\n";
+    ctx.header << "\tvoid to_grpc( " << ctx.grpcns << "::" << message->name << "& ) const;\n";
+    ctx.header << "\tvoid from_grpc( const " << ctx.grpcns << "::" << message->name << "& );\n";
 
     ctx.header << "};" << '\n';
 }
@@ -259,9 +272,12 @@ static void generate_source( Context &ctx, Proto &proto )
     // begin prettify namespace
     for (auto item : ctx.nspace)
         ctx.source << "namespace " << item << "{\n";
+    // templates
+    ctx.source << TEMPLATES << '\n';
     // functions
     for (auto it : proto.messages)
     {
+        generate_operators(ctx, it);
         generate_from_grpc(ctx, it);
         generate_to_grpc(ctx, it);
     }
@@ -301,8 +317,6 @@ static void generate_header( Context &ctx, Proto &proto )
     ctx.nspace.back().append("_");
     for (auto item : ctx.nspace)
         ctx.header << "namespace " << item << "{\n";
-    // auto_new
-    ctx.header << AUTO_NEW << '\n';
     // forward declarations
     for (auto it : proto.messages) print_forward(ctx, it);
     // messages
